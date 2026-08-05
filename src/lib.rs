@@ -40,8 +40,10 @@ impl Device {
         &mut self.driver
     }
 
+    // uncomment this to see that .test_write is not accessible in this scope
+    // although it is acesible below in the test mod
     //pub fn use_test_write(&mut self) {
-    //    self.driver.test_write(RESPONSE_ADDRESS, 0xa5).unwrap();
+    //    self.driver_mut().test_write(RESPONSE_ADDRESS, 0xa5).unwrap();
     //}
 }
 
