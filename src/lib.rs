@@ -39,6 +39,10 @@ impl Device {
     pub fn driver_mut(&mut self) -> &mut MemoryDriver {
         &mut self.driver
     }
+
+    //pub fn use_test_write(&mut self) {
+    //    self.driver.test_write(RESPONSE_ADDRESS, 0xa5).unwrap();
+    //}
 }
 
 impl Default for Device {
