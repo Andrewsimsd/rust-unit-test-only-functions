@@ -1,75 +1,29 @@
-# Unit-test-only memory-map access in Rust
+# Region-restricted memory driver
 
-This project demonstrates how a unit test can mock a memory-mapped device
-response without exposing that capability to application code.
+This workspace contains two crates:
 
-`Device` contains a 16-byte simulated memory map. Its public API does not
-accept addresses:
+- `memory-driver` owns simulated memory and checks every read and write against
+  non-overlapping regions with read-only, write-only, or read/write permission.
+- `rust-unit-test-only-functions` is a consumer of that driver. It defines the
+  device's memory map and propagates `DriverError` when access is forbidden.
 
-- `Device::write(value)` always writes to a private driver write address.
-- `Device::read()` always reads from a separate private driver read address.
+Addresses outside memory return `AddressOutOfBounds`. Addresses inside memory
+but outside a permitted region (or used with the wrong operation) return
+`NotReadable` or `NotWritable`.
 
-The addresses and raw memory access are contained in the private `driver`
-module. Production callers therefore cannot choose an arbitrary address.
+The driver exposes `test_write` only when its `test-support` feature (or its own
+unit-test configuration) is active. The consumer enables that feature solely
+on its dev-dependency, so its unit tests can simulate hardware populating a
+read-only response region before a future read. An ordinary `cargo build` does
+not compile the helper.
 
-The driver also defines this unit-test-only function:
+This is an API-visibility convention, not a security boundary: a downstream
+crate could explicitly enable the public Cargo feature. Keeping it on a
+dev-dependency prevents accidental use in this consumer's production builds.
 
-```rust
-#[cfg(test)]
-pub(super) fn mock_read_response(device: &mut Device, value: u8) {
-    device.memory[READ_ADDRESS] = value;
-}
-```
-
-It simulates hardware writing a response to the hidden read address. Because
-of `#[cfg(test)]`, the function is only compiled when the library's unit-test
-harness is built. The unit test calls it directly through the private driver:
-
-```rust
-driver::mock_read_response(&mut device, 0b1010_0101);
-assert_eq!(device.read(), 0b1010_0101);
-```
-
-The test module can access `driver` because it is a child module of the crate
-root. No separate test-support module is necessary for this small example.
-
-## Running the example
-
-Run the unit test and application with:
+Run everything with:
 
 ```sh
-cargo test
+cargo test --workspace
 cargo run
 ```
-
-The application writes `42` to the hidden write address and reads the untouched
-hidden read address, so `cargo run` prints:
-
-```text
-device response: 0
-```
-
-`src/main.rs` contains a commented-out call to `mock_read_response`.
-Uncommenting it makes `cargo run` fail to compile: the driver is private, and
-the mock function is absent from a non-test library build.
-
-## Integration-test caveat
-
-Tests in `tests/` are integration tests.
-For those, Cargo builds this library as a normal dependency, so `cfg(test)` is
-not enabled for the library. If integration tests must use the mock, use an
-explicit, non-default Cargo feature instead:
-
-```toml
-[features]
-test-support = []
-```
-
-Then replace `#[cfg(test)]` with
-`#[cfg(any(test, feature = "test-support"))]`, expose the required API, and run
-`cargo test --features test-support`.
-
-A Cargo feature can also be enabled by downstream users, so it is not an
-access-control or security boundary. For hardware access that must remain
-strictly unavailable to consumers, keep tests inside the crate or place test
-fakes in a separate development-only crate.

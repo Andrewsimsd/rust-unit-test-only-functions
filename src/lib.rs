@@ -1,23 +1,43 @@
-//! A small example of exposing privileged memory-map operations to unit tests.
+//! Consumer-side device API. The memory driver lives in a separate crate.
 
-/// A simplified memory-mapped device.
+use memory_driver::{DriverError, MemoryDriver, Region};
+
+const COMMAND_ADDRESS: usize = 3;
+const RESPONSE_ADDRESS: usize = 11;
+
 pub struct Device {
-    memory: [u8; 16],
+    driver: MemoryDriver,
 }
 
 impl Device {
     pub fn new() -> Self {
-        Self { memory: [0; 16] }
+        Self {
+            driver: MemoryDriver::new(
+                16,
+                vec![
+                    Region::write_only(0..4),
+                    Region::read_write(4..8),
+                    Region::read_only(8..12),
+                ],
+            )
+            .expect("the static device memory map must be valid"),
+        }
     }
 
-    /// Reads a response from the driver's hidden read address.
-    pub fn read(&self) -> u8 {
-        driver::read(self)
+    pub fn read_response(&self) -> Result<u8, DriverError> {
+        self.driver.read(RESPONSE_ADDRESS)
     }
 
-    /// Writes a command to the driver's hidden write address.
-    pub fn write(&mut self, value: u8) {
-        driver::write(self, value);
+    pub fn write_command(&mut self, value: u8) -> Result<(), DriverError> {
+        self.driver.write(COMMAND_ADDRESS, value)
+    }
+
+    pub fn driver(&self) -> &MemoryDriver {
+        &self.driver
+    }
+
+    pub fn driver_mut(&mut self) -> &mut MemoryDriver {
+        &mut self.driver
     }
 }
 
@@ -27,41 +47,34 @@ impl Default for Device {
     }
 }
 
-/// The driver layer owns unrestricted memory access in production code.
-mod driver {
-    use super::Device;
-
-    // Only the driver knows the memory-map layout in production code.
-    const WRITE_ADDRESS: usize = 3;
-    const READ_ADDRESS: usize = 11;
-
-    pub(super) fn write(device: &mut Device, value: u8) {
-        device.memory[WRITE_ADDRESS] = value;
-    }
-
-    pub(super) fn read(device: &Device) -> u8 {
-        device.memory[READ_ADDRESS]
-    }
-
-    /// Simulates the hardware placing a response at its read address.
-    #[cfg(test)]
-    pub(super) fn mock_read_response(device: &mut Device, value: u8) {
-        device.memory[READ_ADDRESS] = value;
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Device, driver};
+    use super::{Device, RESPONSE_ADDRESS};
+    use memory_driver::DriverError;
 
     #[test]
-    fn reads_a_response_mocked_at_the_hidden_read_address() {
+    fn consumer_obeys_the_driver_memory_map() {
+        let mut device = Device::new();
+        device.write_command(42).unwrap();
+        assert_eq!(device.read_response(), Ok(0));
+        assert_eq!(
+            device.driver_mut().write(11, 99),
+            Err(DriverError::NotWritable { address: 11 })
+        );
+        assert_eq!(
+            device.driver().read(3),
+            Err(DriverError::NotReadable { address: 3 })
+        );
+    }
+
+    #[test]
+    fn consumer_test_can_mock_a_future_hardware_write() {
         let mut device = Device::new();
 
-        // Pretend the hardware produced this response. Application code cannot
-        // access the hidden address or compile this helper.
-        driver::mock_read_response(&mut device, 0b1010_0101);
+        // Available here because this crate enables test-support only on its
+        // dev-dependency. It bypasses write permission to emulate hardware.
+        device.driver_mut().test_write(RESPONSE_ADDRESS, 0xa5).unwrap();
 
-        assert_eq!(device.read(), 0b1010_0101);
+        assert_eq!(device.read_response(), Ok(0xa5));
     }
 }

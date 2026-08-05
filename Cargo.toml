@@ -1,6 +1,14 @@
+[workspace]
+members = ["driver"]
+resolver = "3"
+
 [package]
 name = "rust-unit-test-only-functions"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+memory-driver = { path = "driver" }
+
+[dev-dependencies]
+memory-driver = { path = "driver", features = ["test-support"] }
